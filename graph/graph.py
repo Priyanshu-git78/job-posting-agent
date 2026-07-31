@@ -2,6 +2,10 @@ from .starting import route_start, search_url, company_details_extractor, odx_ed
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
 from uuid import uuid4
+from .resume_builder import resume_evaluator
+
+
+
 def graph_main():
     #initalize the stategraph of langgraph
     graph_builder = StateGraph(State)
@@ -11,6 +15,7 @@ def graph_main():
     graph_builder.add_node("search",search_url)
     graph_builder.add_node("company_details_extractor",company_details_extractor)
     graph_builder.add_node("odx_editor",odx_editor)
+    graph_builder.add_node("evaluator",resume_evaluator)
 
     #conditional 
     graph_builder.add_conditional_edges(
@@ -23,7 +28,8 @@ def graph_main():
     )
 
     graph_builder.add_edge("search", "company_details_extractor")
-    graph_builder.add_edge("company_details_extractor", "odx_editor")
+    graph_builder.add_edge("company_details_extractor", "evaluator")
+    graph_builder.add_edge("evaluator","odx_editor")
     graph_builder.add_edge("odx_editor",END)
 
     checkpointer=InMemorySaver()

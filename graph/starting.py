@@ -27,6 +27,10 @@ class State(TypedDict):
     requirement_responsibilities:str
     my_resume_rank_against_it :str
     my_shortcoming :str
+    skills: str
+    project: str 
+    all_gaps: str
+    
 
 
 class companydetails(BaseModel):
@@ -59,7 +63,8 @@ def odx_editor(state:State):
     df=pd.DataFrame([state])
     print(df)
     write_header = not os.path.exists("details.csv")
-    df.to_csv("details.csv", mode="a",header=write_header,index=False) 
+    df.to_csv("details.csv", mode="a",header=write_header,index=False)
+    return state
 
 def search_url(state:State):
     """Fetch the raw page content from the job posting link."""
@@ -78,8 +83,7 @@ def company_details_extractor(state:State)-> dict:
     ]
 
     llm_structure=llm.with_structured_output(companydetails)
-    response=llm_structure.invoke(messages)
-    print(response)  
+    response=llm_structure.invoke(messages)  
     return response
 
 
