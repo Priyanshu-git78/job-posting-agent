@@ -27,9 +27,11 @@ class State(TypedDict):
     requirement_responsibilities:str
     my_resume_rank_against_it :str
     my_shortcoming :str
-    skills: str
-    project: str 
+    matching_skills: str
+    matching_projects: str 
     all_gaps: str
+    rank:str
+    summary:str
     
 
 
