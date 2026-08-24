@@ -25,6 +25,7 @@ class State(TypedDict):
     requirement_title:str
     requirement_skill :str
     requirement_responsibilities:str
+    resume_info: str
     my_resume_rank_against_it :str
     my_shortcoming :str
     matching_skills: str
