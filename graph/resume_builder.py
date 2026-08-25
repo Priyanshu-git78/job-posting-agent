@@ -1,9 +1,14 @@
 from config import get_llm
 from docx import Document
+from docx.shared import RGBColor, Pt
+import re
 from .starting import State
 from pydantic import BaseModel, Field
 from langchain.messages import AIMessage, HumanMessage, SystemMessage
-
+import copy
+from docx.shared import RGBColor
+from docx.oxml.ns import qn
+from docx.text.paragraph import Paragraph
 
 
 
@@ -13,7 +18,10 @@ class Bio(BaseModel):
     bio:str = Field(description="""Write a concise, keyword-rich "Bio" (professional summary) section for a resume.
 
     Guidelines:
-    - Length: 3-5 sentences (60-100 words), single paragraph
+    - Length: 3-5 sentences (60-100 words), sing
+
+    def insert_skills_with_colored_headings(paragraph, placeholder, skills_text, heading_color=(0x1F, 0x4E, 0x79)):
+        full_text = ''.join(r.text for r in ple paragraph
     - Tailor the content to align the candidate's actual expebiorience with the target job's required skills and responsibilities
     - Naturally weave in keywords from the job requirements (for ATS matching) — do NOT force keywords the candidate has no experience with
     - Lead with role/title + years of experience, then key technical skills, then a differentiator (certification, domain expertise, education, etc.)
@@ -95,7 +103,7 @@ class rank_summary(BaseModel):
 
 
 def resume_evaluator(state:State):
-    doc = Document("Priyanshu_Harsana_Resume.docx")
+    doc = Document(r"supported_documents/Priyanshu_Harsana_Resume.docx")
 
     full_text = []
     for para in doc.paragraphs:
@@ -135,7 +143,7 @@ def summary(state:State):
     requirement_title=    state["requirement_title"]
     requirement_skills=  state["requirement_skill"]
     requirement_responsibilites =state["requirement_responsibilities"]
-    doc = Document("Priyanshu_Harsana_Resume.docx")
+    doc = Document(r"supported_documents/Priyanshu_Harsana_Resume.docx")
     
     full_text = []
     for para in doc.paragraphs:
@@ -167,7 +175,8 @@ def summary(state:State):
     return response
 
 def resumeEdit(state:State):
-    doc = Document("Priyanshu_Harsana_Template.docx") #[AI/ML Engineer with 2+ years of experience building and deploying production-grade Machine Learning , Generative AI and Python-based solutions across the full ML lifecycle—from ETL and feature engineering to model training, LLM applications, multimodal RAG, MLOps, deployment, and monitoring. Skilled in Python, FastAPI, PostgreSQL (pgvector), LangChain, and cloud-ready AI systems. Currently completing an MBA in Artificial Intelligence & Machine Learning, combining strong technical expertise with business strategy.]
+    """edit the resume the according to the analysis and other things extracted evlaute by the LLM"""
+    doc = Document(r"supported_documents/Priyanshu_Harsana_Template.docx") #[AI/ML Engineer with 2+ years of experience building and deploying production-grade Machine Learning , Generative AI and Python-based solutions across the full ML lifecycle—from ETL and feature engineering to model training, LLM applications, multimodal RAG, MLOps, deployment, and monitoring. Skilled in Python, FastAPI, PostgreSQL (pgvector), LangChain, and cloud-ready AI systems. Currently completing an MBA in Artificial Intelligence & Machine Learning, combining strong technical expertise with business strategy.]
     requirement_title=    state["requirement_title"]
     requirement_skills=  state["requirement_skill"]
     requirement_responsibilites =state["requirement_responsibilities"]
@@ -266,15 +275,97 @@ def resumeEdit(state:State):
     llm_structure_skills = llm.with_structured_output(Skills)
     skills_obj = llm_structure_skills.invoke(messages_skills)
     print('skills :',skills_obj)
+    
+
+    def insert_bio_with_highlights(paragraph, placeholder, bio_text, highlight_phrases):
+        full_text = ''.join(r.text for r in paragraph.runs)
+        if placeholder not in full_text:
+            return False
+
+        new_text = full_text.replace(placeholder, bio_text)
+        template_run = paragraph.runs[0]
+
+        for run in paragraph.runs:
+            run.text = ''
+
+        pattern = re.compile('(' + '|'.join(re.escape(p) for p in highlight_phrases) + ')', re.IGNORECASE)
+        parts = [p for p in pattern.split(new_text) if p]
+        lowered_phrases = [p.lower() for p in highlight_phrases]
+
+        first = True
+        for part in parts:
+            if first:
+                run = paragraph.runs[0]
+                run.text = part
+                first = False
+            else:
+                run = paragraph.add_run(part)
+                run.font.name = template_run.font.name
+                run.font.size = template_run.font.size
+
+            run.font.bold = part.lower() in lowered_phrases
+            # If you want a highlighter-style background instead of bold:
+            # from docx.enum.text import WD_COLOR_INDEX
+            # run.font.highlight_color = WD_COLOR_INDEX.YELLOW if part.lower() in lowered_phrases else None
+
+        return True
+
+
+    highlight_phrases = [
+        "2+ years",
+        "Machine Learning",
+        "ETL",
+        "FastAPI",
+        "PostgreSQL (pgvector)",
+        "MBA in Artificial Intelligence & Machine Learning",
+    ]
+
     for paragraph in doc.paragraphs:
-        bio_text = data.bio
-        skills_text    = skills_obj.technical_skills
-        if '[bio]' in paragraph.text:
-            paragraph.text = paragraph.text.replace('[bio]',bio_text)
-        if '[skills]' in paragraph.text:
-                    paragraph.text = paragraph.text.replace('[skills]',skills_text)
-        
-    doc.save("{Resume_1}.docx")
+        insert_bio_with_highlights(paragraph, '[bio]', data.bio, highlight_phrases)
+
+    def insert_skills_with_colored_headings(paragraph, placeholder, skills_text, heading_color=(0x1F, 0x4E, 0x79)):
+        full_text = ''.join(r.text for r in paragraph.runs)
+        if placeholder not in full_text:
+            return False
+
+        lines = [l.strip() for l in skills_text.strip().split('\n') if l.strip()]
+        template_p = paragraph._p
+
+        for run in paragraph.runs:
+            run.text = ''
+
+        insert_after = template_p
+        for i, line in enumerate(lines):
+            if ':' in line:
+                heading, rest = line.split(':', 1)
+                heading, rest = heading.strip() + ':', rest.strip()
+            else:
+                heading, rest = line, ''
+
+            if i == 0:
+                target = paragraph
+            else:
+                new_p = copy.deepcopy(template_p)
+                for r in new_p.findall(qn('w:r')):
+                    new_p.remove(r)
+                insert_after.addnext(new_p)
+                insert_after = new_p
+                target = Paragraph(new_p, paragraph._parent)
+
+            r1 = target.add_run(heading + ' ')
+            r1.font.bold = True
+            r1.font.color.rgb = RGBColor(*heading_color)
+
+            if rest:
+                r2 = target.add_run(rest)
+                r2.font.bold = False
+                r2.font.color.rgb = RGBColor(0, 0, 0)
+
+        return True
 
 
+    for paragraph in doc.paragraphs:
+        insert_skills_with_colored_headings(paragraph, '[skills]', skills_obj.technical_skills)
+    doc.save("resumes/resume.pdf")
+    
 

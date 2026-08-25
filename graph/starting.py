@@ -66,7 +66,7 @@ def odx_editor(state:State):
     df=pd.DataFrame([state])
     print(df)
     write_header = not os.path.exists("details.csv")
-    df.to_csv("details.csv", mode="a",header=write_header,index=False)
+    df.to_csv(r"supported_documents/details.csv", mode="a",header=write_header,index=False)
     return state
 
 def search_url(state:State):
