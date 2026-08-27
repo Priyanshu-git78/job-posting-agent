@@ -4,15 +4,18 @@ from docx.shared import RGBColor, Pt
 import re
 from .starting import State
 from pydantic import BaseModel, Field
-from langchain.messages import AIMessage, HumanMessage, SystemMessage
+from langchain.messages import  HumanMessage, SystemMessage
 import copy
 from docx.shared import RGBColor
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
-
+import subprocess
+import os
 
 
 llm = get_llm()
+
+
 
 class Bio(BaseModel):
     bio:str = Field(description="""Write a concise, keyword-rich "Bio" (professional summary) section for a resume.
@@ -29,7 +32,15 @@ class Bio(BaseModel):
     - Do not fabricate skills, tools, or experience not present in the candidate's details
     - Output ONLY the bio text — no headers, labels, or explanations""")
 
-from pydantic import BaseModel, Field
+    bio_highlight: list[str] = Field(
+        description=(
+            "Verbatim phrases extracted directly from the candidate's bio that an HR "
+            "reviewer should see at a glance — e.g. job titles, years of experience, "
+            "key skills, certifications, quantifiable achievements, education, and "
+            "notable companies. Each item must be an exact substring of the original "
+            "bio text, not a paraphrase or summary."
+        )
+    )
 
 class Skills(BaseModel):
     technical_skills: str = Field(
@@ -80,6 +91,43 @@ class Skills(BaseModel):
     )
 
 
+class RAGExperienceBullet(BaseModel):
+    action_verb: str = Field(
+        description="Strong past-tense action verb describing what the candidate did — e.g. 'Built', 'Designed', 'Architected', 'Developed'."
+    )
+    problem: str = Field(
+        description="The specific problem or business need the RAG system was built to solve. Concrete, not generic (e.g. 'manual search across 10K docs took hours' not 'improve efficiency')."
+    )
+    technical_approach: str = Field(
+        description="The technical architecture used — e.g. vector database, embedding model, LLM, retrieval method."
+    )
+    cloud_platform: str = Field(
+        description="Cloud provider used for deployment — e.g. AWS, GCP, Azure. Empty string if not mentioned."
+    )
+    deployment_method: str = Field(
+        description="Deployment method/framework used — e.g. Docker, Kubernetes, CI/CD pipeline, serverless."
+    )
+    result: str = Field(
+        description="Quantifiable outcome achieved — include a number where possible (e.g. 'reduced query time by 60%')."
+    )
+    highlight_phrases: list[str] = Field(
+        description=(
+            "Verbatim phrases extracted directly from the above fields that an HR/technical "
+            "reviewer should see highlighted at a glance — key tech names, cloud platform, "
+            "and the quantifiable result. Each item must be an exact substring of the field "
+            "text it came from, not a paraphrase."
+        )
+    )
+
+    def to_bullet(self) -> str:
+        return (
+            f"{self.action_verb} a Retrieval-Augmented Generation (RAG) system to solve "
+            f"{self.problem}, by {self.technical_approach}. Deployed on {self.cloud_platform} "
+            f"using {self.deployment_method}, achieving {self.result}."
+        )
+    
+
+
 
 class taloried_recommendations(BaseModel):
     skills: str = Field(description="List the candidate's skills that match the company's job requirements, "
@@ -119,7 +167,7 @@ def resume_evaluator(state:State):
         "4. List missing or weak skills/projects the candidate should improve or add."
     )
     human= HumanMessage(
-        content=f"""
+        content=f"""Bio
         resume details: {text}/n
         job requirements
         company_name:{state["company_name"]},
@@ -268,6 +316,43 @@ def resumeEdit(state:State):
     Write the skills section for this candidate now."""
         ),
     ]
+    messages_rag_experience = [
+    SystemMessage(
+        """You are an expert resume writer specializing in ATS-optimized experience bullets for AI/ML engineers.
+
+    Your task: Extract and structure the candidate's Retrieval-Augmented Generation (RAG) project experience into a single, quantified experience bullet following this exact narrative arc:
+
+    [Action verb] a Retrieval-Augmented Generation (RAG) system to solve [problem/business need], 
+    by [technical approach/architecture — e.g. vector DB, embedding model, LLM]. 
+    Deployed on [cloud platform] using [method/framework], achieving [quantifiable result].
+
+    Guidelines:
+    - action_verb: a strong past-tense verb (e.g. "Built", "Designed", "Architected", "Developed") that matches what the candidate actually did per their resume.
+    - problem: the specific, concrete problem or business need the RAG system addressed — not generic phrasing.
+    - technical_approach: the actual architecture/stack used — vector database, embedding model, LLM, retrieval method, orchestration framework — as stated in the resume.
+    - cloud_platform: the cloud provider used, if mentioned. Empty string if not mentioned in the resume.
+    - deployment_method: the deployment tooling/method used (e.g. Docker, Kubernetes, CI/CD), if mentioned. Empty string if not mentioned.
+    - result: a quantifiable outcome (numbers, percentages, time/cost savings). If no number exists in the resume, state the qualitative outcome as concisely as possible — do not invent a metric.
+    - highlight_phrases: verbatim phrases from the fields above that should be visually highlighted for HR — key tech names, cloud platform, and the result. Must be exact substrings of the field text, not paraphrased.
+
+    Do not fabricate any detail — problem, technical approach, platform, method, or result — that is not present in the candidate's resume. If a field is not mentioned, leave it as an empty string rather than guessing.
+
+    Tailor relevance to the target role's required skills and responsibilities where the resume supports it, but never invent alignment that isn't there.
+
+    Return the result via the RAGExperienceBullet schema only — no headers, labels, or explanations outside the structured output."""
+        ),
+        HumanMessage(
+            f"""Candidate details:
+    {state['resume_info']}
+
+    Target role: {requirement_title}
+    Required skills: {requirement_skills}
+    Responsibilities: {requirement_responsibilites}
+
+    Extract the candidate's RAG project experience from the details above and structure it now."""
+        ),
+    ]
+
 
     llm_structure_bio = llm.with_structured_output(Bio)
     data = llm_structure_bio.invoke(messages)
@@ -275,9 +360,13 @@ def resumeEdit(state:State):
     llm_structure_skills = llm.with_structured_output(Skills)
     skills_obj = llm_structure_skills.invoke(messages_skills)
     print('skills :',skills_obj)
+    llm_structure_rag_experience = llm.with_structured_output(RAGExperienceBullet)
+    rag_experience_obj = llm_structure_rag_experience.invoke(messages_rag_experience)
+
     
 
     def insert_bio_with_highlights(paragraph, placeholder, bio_text, highlight_phrases):
+        """ Highlighting the important parts of the bio"""
         full_text = ''.join(r.text for r in paragraph.runs)
         if placeholder not in full_text:
             return False
@@ -309,16 +398,10 @@ def resumeEdit(state:State):
             # run.font.highlight_color = WD_COLOR_INDEX.YELLOW if part.lower() in lowered_phrases else None
 
         return True
+    highlight_phrases = data.bio_highlight
 
-
-    highlight_phrases = [
-        "2+ years",
-        "Machine Learning",
-        "ETL",
-        "FastAPI",
-        "PostgreSQL (pgvector)",
-        "MBA in Artificial Intelligence & Machine Learning",
-    ]
+    llm.invoke(f" ")
+    
 
     for paragraph in doc.paragraphs:
         insert_bio_with_highlights(paragraph, '[bio]', data.bio, highlight_phrases)
@@ -366,6 +449,71 @@ def resumeEdit(state:State):
 
     for paragraph in doc.paragraphs:
         insert_skills_with_colored_headings(paragraph, '[skills]', skills_obj.technical_skills)
-    doc.save("resumes/resume.pdf")
+
+
+
+    def insert_rag_experience_with_highlights(paragraph, placeholder, rag_text, highlight_phrases):
+        """Highlighting the important parts of the RAG experience bullet"""
+        full_text = ''.join(r.text for r in paragraph.runs)
+        if placeholder not in full_text:
+            return False
+
+        new_text = full_text.replace(placeholder, rag_text)
+        template_run = paragraph.runs[0]
+
+        for run in paragraph.runs:
+            run.text = ''
+
+        if not highlight_phrases:
+            paragraph.runs[0].text = new_text
+            return True
+
+        pattern = re.compile('(' + '|'.join(re.escape(p) for p in highlight_phrases) + ')', re.IGNORECASE)
+        parts = [p for p in pattern.split(new_text) if p]
+        lowered_phrases = [p.lower() for p in highlight_phrases]
+
+        first = True
+        for part in parts:
+            if first:
+                run = paragraph.runs[0]
+                run.text = part
+                first = False
+            else:
+                run = paragraph.add_run(part)
+                run.font.name = template_run.font.name
+                run.font.size = template_run.font.size
+
+            run.font.bold = part.lower() in lowered_phrases
+
+        return True
+
     
+    for paragraph in doc.paragraphs:
+        insert_skills_with_colored_headings(paragraph, '[skills]', skills_obj.technical_skills)
+        insert_rag_experience_with_highlights(paragraph, '[rag_experience]', rag_experience_obj.to_bullet(), rag_experience_obj.highlight_phrases)
+
+
+    def convert_docx_to_pdf(docx_path: str, output_dir: str) -> str:
+        """Convert a .docx file to PDF using LibreOffice headless mode."""
+        result = subprocess.run(
+            ["soffice", "--headless", "--convert-to", "pdf", "--outdir", output_dir, docx_path],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"PDF conversion failed: {result.stderr}")
+
+        pdf_path = os.path.join(output_dir, os.path.splitext(os.path.basename(docx_path))[0] + ".pdf")
+        if not os.path.exists(pdf_path):
+            raise FileNotFoundError(f"Expected PDF not found at {pdf_path}")
+        return pdf_path
+    docx_path = "resumes/resume.docx"
+    doc.save(docx_path)
+
+    pdf_path = convert_docx_to_pdf(docx_path, "resumes")
+    print("PDF saved to:", pdf_path)
+
+    return pdf_path
+
 
