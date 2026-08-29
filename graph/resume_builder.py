@@ -317,39 +317,36 @@ def resumeEdit(state:State):
         ),
     ]
     messages_rag_experience = [
-    SystemMessage(
-        """You are an expert resume writer specializing in ATS-optimized experience bullets for AI/ML engineers.
+        SystemMessage(
+            """You are a resume writer. Extract the candidate's RAG (Retrieval-Augmented Generation) project experience and output it using the RAGExperienceBullet schema.
 
-    Your task: Extract and structure the candidate's Retrieval-Augmented Generation (RAG) project experience into a single, quantified experience bullet following this exact narrative arc:
+    Format to follow:
+    "[Action verb] a RAG system to solve [problem], using [technical approach]. Deployed on [cloud platform] via [deployment method], achieving [result]."
 
-    [Action verb] a Retrieval-Augmented Generation (RAG) system to solve [problem/business need], 
-    by [technical approach/architecture — e.g. vector DB, embedding model, LLM]. 
-    Deployed on [cloud platform] using [method/framework], achieving [quantifiable result].
+    Fields:
+    - action_verb: strong past-tense verb matching what the resume says (e.g. Built, Designed, Developed).
+    - problem: specific business/technical problem the RAG system solved.
+    - technical_approach: stack used (vector DB, embeddings, LLM, retrieval method, framework).
+    - cloud_platform: cloud provider, if mentioned — else "".
+    - deployment_method: deployment tooling (Docker, K8s, CI/CD), if mentioned — else "".
+    - result: quantified outcome if numbers exist; otherwise a short qualitative outcome. Never invent a number.
+    - highlight_phrases: exact substrings (from the fields above) worth highlighting — key tech, platform, result.
 
-    Guidelines:
-    - action_verb: a strong past-tense verb (e.g. "Built", "Designed", "Architected", "Developed") that matches what the candidate actually did per their resume.
-    - problem: the specific, concrete problem or business need the RAG system addressed — not generic phrasing.
-    - technical_approach: the actual architecture/stack used — vector database, embedding model, LLM, retrieval method, orchestration framework — as stated in the resume.
-    - cloud_platform: the cloud provider used, if mentioned. Empty string if not mentioned in the resume.
-    - deployment_method: the deployment tooling/method used (e.g. Docker, Kubernetes, CI/CD), if mentioned. Empty string if not mentioned.
-    - result: a quantifiable outcome (numbers, percentages, time/cost savings). If no number exists in the resume, state the qualitative outcome as concisely as possible — do not invent a metric.
-    - highlight_phrases: verbatim phrases from the fields above that should be visually highlighted for HR — key tech names, cloud platform, and the result. Must be exact substrings of the field text, not paraphrased.
-
-    Do not fabricate any detail — problem, technical approach, platform, method, or result — that is not present in the candidate's resume. If a field is not mentioned, leave it as an empty string rather than guessing.
-
-    Tailor relevance to the target role's required skills and responsibilities where the resume supports it, but never invent alignment that isn't there.
-
-    Return the result via the RAGExperienceBullet schema only — no headers, labels, or explanations outside the structured output."""
+    Rules:
+    1. Use only what's in the resume. Never fabricate details.
+    2. Leave a field "" if not mentioned — don't guess.
+    3. Align wording to the target role's skills/responsibilities only if genuinely supported by the resume.
+    4. Output only the structured schema — no extra text."""
         ),
         HumanMessage(
-            f"""Candidate details:
+            f"""Resume:
     {state['resume_info']}
 
     Target role: {requirement_title}
     Required skills: {requirement_skills}
     Responsibilities: {requirement_responsibilites}
 
-    Extract the candidate's RAG project experience from the details above and structure it now."""
+    Extract and structure the RAG experience now."""
         ),
     ]
 
@@ -451,9 +448,10 @@ def resumeEdit(state:State):
         insert_skills_with_colored_headings(paragraph, '[skills]', skills_obj.technical_skills)
 
 
-
+    
     def insert_rag_experience_with_highlights(paragraph, placeholder, rag_text, highlight_phrases):
         """Highlighting the important parts of the RAG experience bullet"""
+        print("----test: ","paragraph:",paragraph, "Placeholder",placeholder,"rage agent",rag_text,"highlight:",highlight_phrases)
         full_text = ''.join(r.text for r in paragraph.runs)
         if placeholder not in full_text:
             return False
@@ -513,7 +511,5 @@ def resumeEdit(state:State):
 
     pdf_path = convert_docx_to_pdf(docx_path, "resumes")
     print("PDF saved to:", pdf_path)
-
-    return pdf_path
 
 
